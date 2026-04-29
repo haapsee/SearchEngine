@@ -1,0 +1,4 @@
+-I/usr/include/postgresql
+-Iinclude
+-Wall
+-Wextra
