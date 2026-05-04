@@ -2,3 +2,4 @@
 -Iinclude
 -Wall
 -Wextra
+-lcurl

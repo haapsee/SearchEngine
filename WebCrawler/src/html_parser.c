@@ -41,15 +41,22 @@ int is_invalid_prefix(char *url) {
 }
 
 char *normalize_url(char *url, const char *base_url, URLCheckers *checkers) {
+    if (strncmp(url, "//", 2) == 0) {
+        printf("// - %s, %s\n", url, url+2);
+        return strdup(url) + 2;
+    }
     if (regexec(&checkers->http, url, 0, NULL, 0) == 0) {
-        if (strncmp(url, "http://", 7)) {
-            return strdup(url) + 7;
+        printf("Starts with http(s):// - %s\n", url);
+        if (strncmp(url, "http://", strlen("http://"))==0) {
+            return strdup(url) + strlen("http://");
         } else {
-            return strdup(url) + 8;
+            return strdup(url) + strlen("https://");
         }
     } else if (regexec(&checkers->domain, url, 0, NULL, 0) == 0) {
+        printf("Is domain - %s\n", url);
         return url;
     } else  if (regexec(&checkers->relative, url, 0, NULL, 0) == 0) {
+        printf("Is relative - %s\n", url);
         if (url[0] == '/') {
             char *new_url = malloc(sizeof(char)*1024*1024);
             sprintf(new_url, "%s%s", base_url, url);
@@ -59,6 +66,7 @@ char *normalize_url(char *url, const char *base_url, URLCheckers *checkers) {
         }
         return strdup(base_url); // THis will make it discarded for now
     } else {
+        printf("Unknown: %s\n", url);
         return strdup(base_url);
     }
 }
@@ -71,6 +79,7 @@ char **html_parser_extract_links(const char *html, const char *base_url) {
     char **links = NULL;
     int links_count = 0;
 
+
     while (html_copy[0] != '\0') {
         if (strncmp(html_copy, "href=\"", 6) == 0 || strncmp(html_copy, "href='", 6) == 0) {
             for (size_t i = 6; i < strlen(html_copy); i++) {
@@ -80,13 +89,14 @@ char **html_parser_extract_links(const char *html, const char *base_url) {
                     if (is_invalid_prefix(link)) {
                         break;
                     }
-                    char** new_links = malloc(sizeof(char*)*(links_count+1));
+                    char** new_links = malloc(sizeof(char*)*(links_count+2));
                     for (int i = 0; i < links_count; i++) {
                         new_links[i] = links[i];
                     }
                     free(links);
                     links = new_links;
                     new_links[links_count] = normalize_url(link, base_url, checkers);
+                    new_links[links_count+1] = NULL;
                     links_count++;
                     html_copy += i-6;
                     break;
@@ -99,25 +109,77 @@ char **html_parser_extract_links(const char *html, const char *base_url) {
     return links;
 }
 
+char *skip_style(char *html) {
+    while (html[0] != '\0') {
+        if (strncmp("</style>", html, strlen("</style>")) == 0) {
+            html += strlen("</style>");
+            return html;
+        }
+        html++;
+    }
+    return html;
+}
+
+char *skip_script(char *html) {
+    while (html[0] != '\0') {
+        if (strncmp("</script>", html, strlen("</script>")) == 0) {
+            html += strlen("</script>");
+            break;
+        }
+        html++;
+    }
+    return html;
+}
+
+char *skip_quotes(char *html) {
+    while (html[0] != '\0') {
+        if (html[0] == '\"') {
+            html += 1;
+            break;
+        }
+        html++;
+    }
+    return html;
+}
+
+char *skip_tag(char *html) {
+    while (html[0] != '\0') {
+        if (strncmp("=\"", html, 2) == 0) {
+            html += 2;
+            html = skip_quotes(html);
+        } else if (html[0] == '>') {
+            html++;
+            break;
+        } else {
+            html++;
+        }
+    }
+    return html;
+}
+
 char *html_parser_extract_text(const char *html) {
     char *html_dup = strdup(html);
     char *text = (char*) malloc(sizeof(char)*1024*1024);
 
     int text_idx = 0;
     int whitespace = 0;
-    int skip = 0;
 
     while (html_dup[0] != '\0') {
         char c = html_dup[0];
         if (c == '<') {
-            if (whitespace==0) {
-                whitespace = 1;
-                text[text_idx++] = ' ';
+            if (strncmp("<script", html_dup, strlen("<script")) == 0) {
+                html_dup = skip_script(html_dup);
+            } else if (strncmp("<style", html_dup, strlen("<style")) == 0) {
+                html_dup = skip_style(html_dup);
+            } else {
+                html_dup = skip_tag(html_dup);
             }
-            skip = 1;
-        } else if (skip == 1 && c == '>') {
-            skip = 0;
-        } else if (!(isspace(c) && whitespace) && !skip) {
+            if (!whitespace) {
+                text[text_idx++] = ' ';
+                whitespace = 1;
+            }
+            continue;
+        } else if (!(isspace(c) && whitespace)) {
             if (isspace(c)) {
                 c = ' ';
                 whitespace = 1;

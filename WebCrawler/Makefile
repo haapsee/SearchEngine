@@ -8,7 +8,7 @@ CFLAGS = -Wextra -Iinclude
 # Find the include path (usually /usr/include/postgresql)
 CFLAGS += -I$(shell pg_config --includedir)
 # Link the library
-LDFLAGS = -L$(shell pg_config --libdir) -lpq
+LDFLAGS = -L$(shell pg_config --libdir) -lpq -lcurl
 
 SRCS = $(wildcard src/*.c)
 

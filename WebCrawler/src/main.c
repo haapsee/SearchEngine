@@ -1,19 +1,83 @@
+#include <stdlib.h>
+#include <string.h>
 #include <stdio.h>
 #include "../include/env.h"
 #include "../include/db_manager.h"
 #include "../include/html_parser.h"
+#include "../include/http_client.h"
+#include "logger.h"
+
+typedef struct Node {
+    char *url;
+    struct Node *next;
+} Node;
+
+
+char *extract_base_url(char *url) {
+    char *dup = strdup(url);
+    for ( size_t i = 0; i < strlen(dup); i++) {
+        if (dup[i] == '/') {
+            dup[i] = '\0';
+            return dup;
+        }
+    }
+    return dup;
+}
+
+struct Node *push_to_q(struct Node *last, char **links) {
+    for (int i = 0; links[i] != NULL; i++) {
+        struct Node *n = (struct Node*)malloc(sizeof(struct Node));
+        n->next = NULL;
+        n->url = links[i];
+        if (last != NULL) {
+            last->next = n;
+        }
+        last = n;
+    }
+    return last;
+}
+
+struct Node *pop(struct Node *n) {
+    struct Node *next = n->next;
+    free(n);
+    return next;
+}
 
 int main() {
-    const char *html = "<!-- Standard external link --><p><a href=\"https://www.google.com\" target=\"_blank\">Visit Google</a> (Opens in new tab)</p><!-- Internal/Relative link --><p><a href=\"/about-us\">About Us</a> (Links to a page on same server)</p><!-- Anchor link (Scrolls to a specific ID on the page) --><p><a href=\"#footer\">Jump to Footer</a></p><!-- Email link --><p><a href=\"mailto:support@example.com\">Contact Support</a></p><!-- Telephone link --><p><a href=\"tel:+15550109999\">Call Us: (555) 010-9999</a></p><!-- Download link --><p><a href=\"/files/whitepaper.pdf\" download>Download PDF</a></p><!-- Link as a Button (using CSS class) --><a href=\"/signup\" class=\"button-style\" style=\"padding: 10px; background: blue; color: white; text-decoration: none;\">Sign Up Now</a>";
-    char** links = html_parser_extract_links(html, "example.com");
+    struct Node *last = (struct Node*)malloc(sizeof(struct Node));
+    last->next = NULL;
+    last->url = "reddit.com";
+    struct Node *first = (struct Node*)malloc(sizeof(struct Node));
+    first->next = last;
+    first->url = "wikipedia.org/static/apple-touch/wikipedia.png";
 
-    int c = 0;
-    while (links[c] != NULL) {
-        printf("%s\n", links[c]);
-        c++;
+
+    env_load(".env");
+    const char* db_host = env_get("POSTGRES_HOST", "localhost");
+    const char* db_db = env_get("POSTGRES_DB", "database");
+    const char* db_port = env_get("POSTGRES_PORT", "5432");
+    const char* db_user = env_get("POSTGRES_USER", "admin");
+    const char* db_password = env_get("POSTGRES_PASSWORD", "admin");
+
+    db_manager_init(db_host, db_port, db_db, db_user, db_password);
+
+    while(db_manager_count_sites() < 100) {
+        char *url = first->url;
+        log_info("\nHandling %s\n", url);
+        long http_code = 0;
+        log_debug("Fetching html");
+        char *html = http_client_fetch(url, &http_code);
+        log_debug("Paarsing content");
+        char *content = html_parser_extract_text(html);
+        log_debug("Parsing links");
+        char **links = html_parser_extract_links(html, extract_base_url(url));
+        if (links != NULL) {
+            last = push_to_q(last, links);
+        }
+        first = pop(first);
+        log_debug("Saving to database");
+        db_manager_insert_site(url, content);
     }
-
-    printf("\nContent:\n %s\n", html_parser_extract_text(html));
 
     printf("\n\nProram finished!\n");
     fflush(stdout);
